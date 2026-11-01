@@ -418,6 +418,48 @@ fn ctrl_v_pastes_an_image_when_no_paste_event_arrives() {
     assert_eq!(pictures(harness.state()), 1);
 }
 
+/// #1641: a browser's "Copy Image" leaves the URL as text, a lone `<img>` as HTML and the bitmap. The
+/// bitmap is pasted, once; with no bitmap on the clipboard the URL text still pastes.
+#[test]
+fn browser_image_copy_pastes_the_bitmap_not_the_url() {
+    let paste = |with_bitmap: bool| {
+        let session = Session::with_new();
+        let png = {
+            let d = session.active().unwrap();
+            deckcraft_engine::cmd::file::render_png(&d.doc, 0, 0.1, false).0
+        };
+        let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = reads.clone();
+        let services = Services {
+            clipboard_html: Some(Box::new(|| Some(r#"<a href="https://example.org/source"><img src="https://example.org/owned.png"></a>"#.into()))),
+            clipboard_image: with_bitmap.then(|| {
+                Box::new(move || {
+                    seen.set(seen.get() + 1);
+                    Some(png.clone())
+                }) as Box<dyn FnMut() -> Option<Vec<u8>>>
+            }),
+            ..Default::default()
+        };
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, services),
+        );
+        harness.run_steps(2);
+        harness.event(egui::Event::Paste("https://example.org/owned.png".into()));
+        harness.run_steps(2);
+        let d = harness.state().session.active().unwrap();
+        let pictures = d.doc.slides[0].shapes.iter().filter(|s| matches!(s.kind, deckcraft_model::ShapeKind::Picture { .. })).count();
+        (pictures, d.doc.slides[0].shapes.len(), reads.get())
+    };
+    let (pictures, _, reads) = paste(true);
+    assert_eq!((pictures, reads), (1, 1), "the bitmap is read and pasted once");
+    let (pictures, _, _) = paste(false);
+    assert_eq!(pictures, 0, "without a bitmap the text fallback is kept");
+}
+
 /// #78: after Tab in a text box, typing and deleting no longer reached the text.
 #[test]
 fn typing_goes_on_after_tab_in_a_text_box() {

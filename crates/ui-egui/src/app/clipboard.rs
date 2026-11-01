@@ -11,6 +11,26 @@ pub(crate) fn system_clipboard_text(t: &str) -> String {
     if t.is_empty() { OBJECTS_MARKER.to_string() } else { t.to_string() }
 }
 
+/// Whether clipboard HTML is exactly one `<img>` and no visible text, as a browser's "Copy Image"
+/// leaves it. Rich text that merely contains an inline image, and anything with words, is not.
+pub(crate) fn html_is_one_bare_image(html: &str) -> bool {
+    let lower = html.to_ascii_lowercase();
+    if lower.matches("<img").count() != 1 {
+        return false;
+    }
+    let mut in_tag = false;
+    let mut text = String::new();
+    for c in lower.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => text.push(c),
+            _ => {}
+        }
+    }
+    text.replace("&nbsp;", " ").trim().is_empty()
+}
+
 impl SlideApp {
     /// Offer the copy or cut on the system clipboard.
     ///
@@ -28,5 +48,20 @@ impl SlideApp {
             return;
         }
         ctx.copy_text(system_clipboard_text(&text));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::html_is_one_bare_image;
+
+    #[test]
+    fn only_a_lone_image_counts() {
+        assert!(html_is_one_bare_image(r#"<a href="https://example.org/s"><img src="https://example.org/o.png" alt="x"></a>"#));
+        assert!(html_is_one_bare_image("<meta charset='utf-8'><!--StartFragment--><IMG SRC=a.png>&nbsp;<!--EndFragment-->"));
+        assert!(!html_is_one_bare_image("<p>Look: <img src=a.png></p>"));
+        assert!(!html_is_one_bare_image("<img src=a.png><img src=b.png>"));
+        assert!(!html_is_one_bare_image("<p><b>Hi</b></p>"));
+        assert!(!html_is_one_bare_image(""));
     }
 }

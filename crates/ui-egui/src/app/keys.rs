@@ -1,4 +1,4 @@
-use super::clipboard::OBJECTS_MARKER;
+use super::clipboard::{OBJECTS_MARKER, html_is_one_bare_image};
 use super::{Mods, SlideApp, Value, backstage, json, menus};
 
 impl SlideApp {
@@ -153,7 +153,14 @@ impl SlideApp {
                     let html = self.services.clipboard_html.as_mut().and_then(|f| f()).filter(|h| !h.is_empty());
                     // egui 0.37 sends `PasteImage` directly; the services fallback stays for
                     // integrations that still send an empty `Paste`. Never insert twice.
-                    let img = if text.is_empty() && !pasted_image_event { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
+                    // A browser's "Copy Image" also puts the picture's URL on the clipboard as text. When the
+                    // HTML is just that one image, the bitmap wins; without a bitmap the text still pastes.
+                    let bare_image = html.as_deref().is_some_and(html_is_one_bare_image);
+                    let img = if (text.is_empty() || bare_image) && !pasted_image_event {
+                        self.services.clipboard_image.as_mut().and_then(|f| f())
+                    } else {
+                        None
+                    };
                     let revision = self.session.active().map(|d| d.revision);
                     let r = match img {
                         Some(png) => self
